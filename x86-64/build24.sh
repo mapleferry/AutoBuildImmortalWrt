@@ -30,10 +30,21 @@ else
 
   # 拷贝 run/x86 下所有 run 文件和ipk文件 到 extra-packages 目录
   mkdir -p /home/build/immortalwrt/extra-packages
-  cp -r /tmp/store-run-repo/run/x86/* /home/build/immortalwrt/extra-packages/
+  cp -r /tmp/store-run-repo/run/x86/* /home/build/immortalwrt/extra-packages/ 2>/dev/null || true
 
   echo "✅ Run files copied to extra-packages:"
-  ls -lh /home/build/immortalwrt/extra-packages/*.run
+  ls -lh /home/build/immortalwrt/extra-packages/*.run 2>/dev/null || echo "  无 .run 文件"
+  
+  # ============= 下载第三方源码仓库插件 ==============
+  # 下载 luci-app-parentcontrol（如果已启用）
+  if echo "$CUSTOM_PACKAGES" | grep -q "luci-app-parentcontrol"; then
+    echo "🔄 下载 luci-app-parentcontrol..."
+    git clone --depth=1 https://github.com/sirpdboy/luci-app-parentcontrol.git /tmp/parentcontrol 2>/dev/null && \
+      (find /tmp/parentcontrol -name "*x86_64*.ipk" 2>/dev/null || find /tmp/parentcontrol -name "*.ipk" 2>/dev/null) | head -1 | \
+      xargs -r -I {} cp {} /home/build/immortalwrt/extra-packages/ 2>/dev/null && \
+      echo "✅ luci-app-parentcontrol 已准备" || echo "⚠️ luci-app-parentcontrol 下载失败，将跳过"
+  fi
+  
   # 解压并拷贝ipk到packages目录
   cd /home/build/immortalwrt && sh shell/prepare-packages.sh
   ls -lah /home/build/immortalwrt/packages/
@@ -67,6 +78,29 @@ PACKAGES="$PACKAGES luci-i18n-dufs-zh-cn"
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
+# ======== 通用插件兼容性检测 =======
+# 检查第三方插件是否有对应的 .ipk 文件，如果没有则跳过
+echo "🔍 检查插件兼容性..."
+
+if [ -d "/home/build/immortalwrt/packages" ] && [ -n "$CUSTOM_PACKAGES" ]; then
+    VALID_PACKAGES=""
+    for pkg in $PACKAGES; do
+        [ -z "$pkg" ] || [[ "$pkg" == -* ]] && continue
+        
+        # 检查第三方插件是否有对应的 .ipk 文件
+        if echo "$CUSTOM_PACKAGES" | grep -qw "$pkg"; then
+            if find /home/build/immortalwrt/packages -name "${pkg}_*.ipk" -o -name "${pkg}.ipk" 2>/dev/null | grep -q .; then
+                VALID_PACKAGES="$VALID_PACKAGES $pkg"
+            else
+                echo "⚠️ $pkg - 未找到 .ipk 文件，跳过"
+            fi
+        else
+            # 基础包直接添加
+            VALID_PACKAGES="$VALID_PACKAGES $pkg"
+        fi
+    done
+    PACKAGES=$(echo "$VALID_PACKAGES" | tr -s ' ')
+fi
 
 # 判断是否需要编译 Docker 插件
 if [ "$INCLUDE_DOCKER" = "yes" ]; then
@@ -93,9 +127,22 @@ fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
 
-make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
+make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/build.log
 
-if [ $? -ne 0 ]; then
+BUILD_EXIT_CODE=${PIPESTATUS[0]}
+
+# 如果编译失败，检查是否是插件兼容性问题
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    echo "❌ 编译失败，检查错误原因..."
+    
+    # 检测常见的插件错误
+    if grep -q "chmod: cannot access '/etc/init.d/" /tmp/build.log; then
+        echo "⚠️ 检测到 init 脚本错误，相关插件可能需要修复"
+    fi
+    if grep -q "uci: command not found\|syntax error" /tmp/build.log; then
+        echo "⚠️ 检测到脚本错误，可能是插件兼容性问题"
+    fi
+    
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
     exit 1
 fi
