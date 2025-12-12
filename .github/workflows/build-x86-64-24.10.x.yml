@@ -109,8 +109,22 @@ jobs:
           immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
           
 
-      - name: Create info
+      - name: Add date stamp and create info
         run: |
+          DATE_STAMP=$(date +%Y%m%d)
+          BUILD_DIR="${{ github.workspace }}/bin/targets/x86/64"
+          
+          # 重命名文件添加日期戳
+          for pattern in "squashfs-combined-efi.img.gz" "*.qcow2"; do
+            for file in "$BUILD_DIR"/$pattern; do
+              [ -f "$file" ] || continue
+              ext="${file##*.}"
+              name="${file%.*}"
+              mv "$file" "${name}-${DATE_STAMP}.${ext}"
+            done
+          done
+          
+          # 创建信息文件
           cat > ${{ github.workspace }}/router-info.md <<EOF
           ## 📡 路由器后台信息
           <a href="https://wkdaily.cpolar.cn/archives/1">
@@ -120,14 +134,12 @@ jobs:
           - 🏠 **后台地址**: ${{ github.event.inputs.custom_router_ip }}
           - 👤 **用户名**: root
           - 🔑 **密码**: 无
+          - 📅 **编译日期**: ${DATE_STAMP}
           EOF
-
-          if [ "${{ github.event.inputs.include_docker }}" == "yes" ]; then
-            extra_content="#### 默认带docker"
-            echo -e "\n$extra_content" >> ${{ github.workspace }}/router-info.md
-          else
+          
+          [ "${{ github.event.inputs.include_docker }}" == "yes" ] && \
+            echo -e "\n#### 默认带docker" >> ${{ github.workspace }}/router-info.md || \
             echo -e "\n#### 不带docker" >> ${{ github.workspace }}/router-info.md
-          fi
 
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
@@ -135,8 +147,8 @@ jobs:
           tag_name: Autobuild-x86-64
           body_path: ${{ github.workspace }}/router-info.md
           files: |
-            ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz
-            ${{ github.workspace }}/bin/targets/x86/64/*.qcow2
+            ${{ github.workspace }}/bin/targets/x86/64/*-*.img.gz
+            ${{ github.workspace }}/bin/targets/x86/64/*-*.qcow2
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
