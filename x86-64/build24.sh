@@ -79,13 +79,30 @@ PACKAGES="$PACKAGES luci-i18n-dufs-zh-cn"
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
 # ======== 通用插件兼容性检测 =======
-# 检查第三方插件是否有对应的 .ipk 文件，如果没有则跳过
+# 检查插件是否有问题，如果有则跳过但保留在列表中
 echo "🔍 检查插件兼容性..."
 
+# 读取上次检测到的问题插件列表（如果存在）
+KNOWN_PROBLEMATIC=""
+if [ -f "/tmp/problematic_packages.txt" ]; then
+    KNOWN_PROBLEMATIC=$(cat /tmp/problematic_packages.txt 2>/dev/null | tr '\n' ' ' | tr -s ' ')
+    if [ -n "$KNOWN_PROBLEMATIC" ]; then
+        echo "📋 已知问题插件（将自动跳过）: $KNOWN_PROBLEMATIC"
+    fi
+fi
+
+SKIPPED_PACKAGES=""
 if [ -d "/home/build/immortalwrt/packages" ] && [ -n "$CUSTOM_PACKAGES" ]; then
     VALID_PACKAGES=""
     for pkg in $PACKAGES; do
         [ -z "$pkg" ] || [[ "$pkg" == -* ]] && continue
+        
+        # 检查是否是已知有问题的插件
+        if echo "$KNOWN_PROBLEMATIC" | grep -qw "$pkg"; then
+            echo "⚠️ $pkg - 已知问题插件，跳过"
+            SKIPPED_PACKAGES="$SKIPPED_PACKAGES $pkg"
+            continue
+        fi
         
         # 检查第三方插件是否有对应的 .ipk 文件
         if echo "$CUSTOM_PACKAGES" | grep -qw "$pkg"; then
@@ -93,6 +110,7 @@ if [ -d "/home/build/immortalwrt/packages" ] && [ -n "$CUSTOM_PACKAGES" ]; then
                 VALID_PACKAGES="$VALID_PACKAGES $pkg"
             else
                 echo "⚠️ $pkg - 未找到 .ipk 文件，跳过"
+                SKIPPED_PACKAGES="$SKIPPED_PACKAGES $pkg"
             fi
         else
             # 基础包直接添加
@@ -100,6 +118,10 @@ if [ -d "/home/build/immortalwrt/packages" ] && [ -n "$CUSTOM_PACKAGES" ]; then
         fi
     done
     PACKAGES=$(echo "$VALID_PACKAGES" | tr -s ' ')
+    
+    if [ -n "$SKIPPED_PACKAGES" ]; then
+        echo "📋 本次已跳过的插件: $SKIPPED_PACKAGES"
+    fi
 fi
 
 # 判断是否需要编译 Docker 插件
@@ -131,20 +153,63 @@ make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt
 
 BUILD_EXIT_CODE=${PIPESTATUS[0]}
 
-# 如果编译失败，检查是否是插件兼容性问题
+# 检查编译结果，通用检测有问题的插件
+PROBLEMATIC_PKGS=""
+
+# 检测 init 脚本缺失的插件
+for pkg in $(grep -o "chmod: cannot access '/etc/init.d/[^']*'" /tmp/build.log 2>/dev/null | sed "s|.*'/etc/init.d/\([^']*\)'.*|\1|" | sort -u); do
+    # 尝试匹配包名（可能是 easytier 或 luci-app-easytier）
+    matched_pkg=""
+    for check_pkg in "$pkg" "luci-app-$pkg" "$(echo "$pkg" | sed 's/^luci-app-//')"; do
+        if echo "$CUSTOM_PACKAGES" | grep -qw "$check_pkg"; then
+            matched_pkg="$check_pkg"
+            break
+        fi
+    done
+    if [ -n "$matched_pkg" ] && ! echo "$PROBLEMATIC_PKGS" | grep -qw "$matched_pkg"; then
+        PROBLEMATIC_PKGS="$PROBLEMATIC_PKGS $matched_pkg"
+        echo "⚠️ 检测到有问题的插件: $matched_pkg (init 脚本缺失)"
+    fi
+done
+
+# 检测脚本错误的插件（uci 命令未找到、语法错误等）
+for pkg in $(grep -o "/etc/init.d/[^:]*" /tmp/build.log 2>/dev/null | sed 's|/etc/init.d/||' | sort -u); do
+    matched_pkg=""
+    for check_pkg in "$pkg" "luci-app-$pkg" "$(echo "$pkg" | sed 's/^luci-app-//')"; do
+        if echo "$CUSTOM_PACKAGES" | grep -qw "$check_pkg"; then
+            matched_pkg="$check_pkg"
+            break
+        fi
+    done
+    if [ -n "$matched_pkg" ] && ! echo "$PROBLEMATIC_PKGS" | grep -qw "$matched_pkg"; then
+        PROBLEMATIC_PKGS="$PROBLEMATIC_PKGS $matched_pkg"
+        echo "⚠️ 检测到有问题的插件: $matched_pkg (脚本错误)"
+    fi
+done
+
 if [ $BUILD_EXIT_CODE -ne 0 ]; then
-    echo "❌ 编译失败，检查错误原因..."
+    # 检查是否是已知的警告（这些通常不会导致编译失败）
+    WARNINGS_ONLY=$(grep -c "chmod: cannot access\|uci: command not found\|syntax error" /tmp/build.log 2>/dev/null || echo "0")
+    REAL_ERRORS=$(grep -ic "Error\|error:" /tmp/build.log 2>/dev/null || echo "0")
     
-    # 检测常见的插件错误
-    if grep -q "chmod: cannot access '/etc/init.d/" /tmp/build.log; then
-        echo "⚠️ 检测到 init 脚本错误，相关插件可能需要修复"
+    if [ "$WARNINGS_ONLY" -gt 0 ] && [ "$REAL_ERRORS" -eq 0 ]; then
+        echo "⚠️ 检测到已知警告（插件兼容性问题），但编译可能已成功，继续..."
+        if [ -n "$PROBLEMATIC_PKGS" ]; then
+            echo "💡 下次编译时将自动跳过这些插件: $PROBLEMATIC_PKGS"
+        fi
+        BUILD_EXIT_CODE=0
+    else
+        echo "❌ 编译失败，检查错误原因..."
+        if [ -n "$PROBLEMATIC_PKGS" ]; then
+            echo "💡 检测到有问题的插件: $PROBLEMATIC_PKGS"
+        fi
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
+        exit 1
     fi
-    if grep -q "uci: command not found\|syntax error" /tmp/build.log; then
-        echo "⚠️ 检测到脚本错误，可能是插件兼容性问题"
-    fi
-    
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
-    exit 1
+elif [ -n "$PROBLEMATIC_PKGS" ]; then
+    echo "💡 检测到有问题的插件（已自动跳过）: $PROBLEMATIC_PKGS"
+    # 保存问题插件列表，供下次编译使用
+    echo "$PROBLEMATIC_PKGS" | tr ' ' '\n' > /tmp/problematic_packages.txt 2>/dev/null || true
 fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."

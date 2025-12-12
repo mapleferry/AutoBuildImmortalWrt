@@ -108,19 +108,27 @@ jobs:
             -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
           immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
           
+      - name: Fix file permissions
+        run: |
+          luci_version="${{ github.event.inputs.luci_version }}"
+          docker run --rm -i \
+            --user root \
+            -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
+            immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} \
+            chown -R $(id -u):$(id -g) /home/build/immortalwrt/bin
 
       - name: Add date stamp and create info
         run: |
           DATE_STAMP=$(date +%Y%m%d)
           BUILD_DIR="${{ github.workspace }}/bin/targets/x86/64"
           
-          # 重命名文件添加日期戳（使用 cp+rm 避免权限问题）
+          # 重命名文件添加日期戳
           for pattern in "squashfs-combined-efi.img.gz" "*.qcow2"; do
             for file in "$BUILD_DIR"/$pattern; do
               [ -f "$file" ] || continue
               ext="${file##*.}"
               name="${file%.*}"
-              cp "$file" "${name}-${DATE_STAMP}.${ext}" && rm -f "$file"
+              mv "$file" "${name}-${DATE_STAMP}.${ext}"
             done
           done
           
