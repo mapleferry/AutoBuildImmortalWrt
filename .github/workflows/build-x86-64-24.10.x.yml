@@ -59,23 +59,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set executable permissions
-        run: chmod +x ${{ github.workspace }}/x86-64/build24.sh
-
-      - name: Save Custom Router IP into OpenWrt files
+      - name: Prepare build environment
         run: |
+          set -e
+          # 检查必要文件
+          [ -f "${{ github.workspace }}/x86-64/build24.sh" ] || { echo "❌ build24.sh 不存在"; exit 1; }
+          [ -f "${{ github.workspace }}/x86-64/imm.config" ] || { echo "❌ imm.config 不存在"; exit 1; }
+          chmod +x ${{ github.workspace }}/x86-64/build24.sh
+          
+          # 保存路由器IP配置
           mkdir -p "${{ github.workspace }}/custom"
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
-          echo "您设置的路由器管理地址是:${{ github.event.inputs.custom_router_ip }}"
-          # 后续步骤会将该文件映射到路由器/etc/config/custom_router_ip.txt 以便用于开机脚本99-custom.sh读取用户设置的ip
-      
-      - name: Validate PPPoE Inputs
-        run: |
-          if [[ "${{ inputs.enable_pppoe }}" == "yes" ]]; then
-            if [[ -z "${{ inputs.pppoe_account }}" || -z "${{ inputs.pppoe_password }}" ]]; then
-              echo "Error: PPPoE account and password must be provided when PPPoE is enabled!"
+          echo "✅ 路由器管理地址: ${{ github.event.inputs.custom_router_ip }}"
+          
+          # 验证PPPoE输入
+          if [[ "${{ github.event.inputs.enable_pppoe }}" == "yes" ]]; then
+            [[ -n "${{ github.event.inputs.pppoe_account }}" && -n "${{ github.event.inputs.pppoe_password }}" ]] || {
+              echo "❌ 启用PPPoE时必须提供账号和密码"
               exit 1
-            fi
+            }
           fi
       
       - name: Enable Store integration
@@ -89,10 +91,13 @@ jobs:
 
       - name: Build ImmortalWrt-x86-64-efi
         run: |
+          set -e
           profile="${{ github.event.inputs.profile }}"
           include_docker="${{ github.event.inputs.include_docker }}"
           luci_version="${{ github.event.inputs.luci_version }}"
-          echo "Building for profile: $profile"
+          
+          echo "📦 编译参数: profile=$profile, luci_version=$luci_version, docker=$include_docker"
+          
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
@@ -103,36 +108,38 @@ jobs:
             -v "${{ github.workspace }}/x86-64/build24.sh:/home/build/immortalwrt/build.sh" \
             -e PROFILE=$profile \
             -e INCLUDE_DOCKER=$include_docker \
-            -e ENABLE_PPPOE=${{ inputs.enable_pppoe }} \
-            -e PPPOE_ACCOUNT=${{ inputs.pppoe_account }} \
-            -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
+            -e ENABLE_PPPOE=${{ github.event.inputs.enable_pppoe }} \
+            -e PPPOE_ACCOUNT=${{ github.event.inputs.pppoe_account }} \
+            -e PPPOE_PASSWORD=${{ github.event.inputs.pppoe_password }} \
           immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
-          
-      - name: Fix file permissions
+
+      - name: Post-build processing
         run: |
+          set -e
           luci_version="${{ github.event.inputs.luci_version }}"
+          BUILD_DIR="${{ github.workspace }}/bin/targets/x86/64"
+          
+          # 修复文件权限
+          [ -d "${{ github.workspace }}/bin" ] || { echo "❌ bin 目录不存在"; exit 1; }
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
             immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} \
             chown -R $(id -u):$(id -g) /home/build/immortalwrt/bin
+          
+          # 验证编译输出
+          [ -d "$BUILD_DIR" ] || { echo "❌ 编译输出目录不存在"; exit 1; }
+          IMG_COUNT=$(find "$BUILD_DIR" -name "*.img.gz" -type f 2>/dev/null | wc -l)
+          QCOW2_COUNT=$(find "$BUILD_DIR" -name "*.qcow2" -type f 2>/dev/null | wc -l)
+          [ "$IMG_COUNT" -gt 0 ] || [ "$QCOW2_COUNT" -gt 0 ] || { echo "❌ 未找到编译输出文件"; exit 1; }
+          echo "✅ 编译成功: $IMG_COUNT 个 .img.gz, $QCOW2_COUNT 个 .qcow2"
 
-      - name: Add date stamp and create info
+      - name: Create release info
         run: |
-          DATE_STAMP=$(date +%Y%m%d)
-          BUILD_DIR="${{ github.workspace }}/bin/targets/x86/64"
+          set -e
+          RELEASE_TAG=$(date +%Y-%m-%d)
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
           
-          # 重命名文件添加日期戳
-          for pattern in "squashfs-combined-efi.img.gz" "*.qcow2"; do
-            for file in "$BUILD_DIR"/$pattern; do
-              [ -f "$file" ] || continue
-              ext="${file##*.}"
-              name="${file%.*}"
-              mv "$file" "${name}-${DATE_STAMP}.${ext}"
-            done
-          done
-          
-          # 创建信息文件
           cat > ${{ github.workspace }}/router-info.md <<EOF
           ## 📡 路由器后台信息
           <a href="https://wkdaily.cpolar.cn/archives/1">
@@ -142,7 +149,6 @@ jobs:
           - 🏠 **后台地址**: ${{ github.event.inputs.custom_router_ip }}
           - 👤 **用户名**: root
           - 🔑 **密码**: 无
-          - 📅 **编译日期**: ${DATE_STAMP}
           EOF
           
           [ "${{ github.event.inputs.include_docker }}" == "yes" ] && \
@@ -152,11 +158,13 @@ jobs:
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Autobuild-x86-64
+          tag_name: ${{ env.RELEASE_TAG }}
           body_path: ${{ github.workspace }}/router-info.md
           files: |
-            ${{ github.workspace }}/bin/targets/x86/64/*-*.img.gz
-            ${{ github.workspace }}/bin/targets/x86/64/*-*.qcow2
+            ${{ github.workspace }}/bin/targets/x86/64/*.img.gz
+            ${{ github.workspace }}/bin/targets/x86/64/*.qcow2
           token: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: false
