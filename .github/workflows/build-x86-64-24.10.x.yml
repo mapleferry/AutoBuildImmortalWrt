@@ -114,13 +114,13 @@ jobs:
           DATE_STAMP=$(date +%Y%m%d)
           BUILD_DIR="${{ github.workspace }}/bin/targets/x86/64"
           
-          # 重命名文件添加日期戳
+          # 重命名文件添加日期戳（使用 cp+rm 避免权限问题）
           for pattern in "squashfs-combined-efi.img.gz" "*.qcow2"; do
             for file in "$BUILD_DIR"/$pattern; do
               [ -f "$file" ] || continue
               ext="${file##*.}"
               name="${file%.*}"
-              mv "$file" "${name}-${DATE_STAMP}.${ext}"
+              cp "$file" "${name}-${DATE_STAMP}.${ext}" && rm -f "$file"
             done
           done
           
