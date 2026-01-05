@@ -127,6 +127,13 @@ jobs:
               exit 1
             fi
           fi
+
+      - name: Check Docker
+        run: |
+          if [[ "${{ inputs.include_docker }}" == "yes" ]]; then
+             echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES docker"' >> shell/custom-packages.sh
+             echo "✅ 已为Rockchip平台补充 docker 组件"
+          fi
       
       - name: Enable Store integration
         run: |
