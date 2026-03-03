@@ -100,7 +100,7 @@ if ! command -v qemu-img &>/dev/null; then
     apt-get update -qq && apt-get install -y -qq qemu-utils 2>/dev/null || true
 fi
 if command -v qemu-img &>/dev/null; then
-    cd bin/targets/x86/64
+    cd bin/targets/x86/64 || { echo "Output dir not found"; exit 1; }
     for f in *squashfs-combined-efi.img.gz; do
         [ -f "$f" ] || continue
         gzip -dc "$f" > "${f%.gz}" || [ $? -eq 2 ]

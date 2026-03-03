@@ -110,7 +110,25 @@ jobs:
           immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
 
       - name: Fix permissions for release upload
-        run: sudo chown -R $USER: ${{ github.workspace }}/bin
+        run: |
+          sudo chown -R $USER: ${{ github.workspace }}/bin
+
+      - name: Convert IMG to QCOW2 (fallback when not built in container)
+        run: |
+          cd ${{ github.workspace }}/bin/targets/x86/64
+          if ! compgen -G "*squashfs-combined-efi.qcow2" > /dev/null; then
+            echo "QCOW2 not found, converting from IMG..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq qemu-utils
+            for f in *squashfs-combined-efi.img.gz; do
+              [ -f "$f" ] || continue
+              gzip -dc "$f" > "${f%.gz}" || [ $? -eq 2 ]
+              [ -f "${f%.gz}" ] || { echo "Decompression failed"; exit 1; }
+              qemu-img convert -f raw -O qcow2 "${f%.gz}" "${f%.img.gz}.qcow2"
+              rm -f "${f%.gz}"
+            done
+          else
+            echo "QCOW2 already exists, skip conversion."
+          fi
 
       - name: Create info
         run: |
