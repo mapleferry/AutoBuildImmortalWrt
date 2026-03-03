@@ -661,12 +661,14 @@ jobs:
           custom_router_ip="${{ github.event.inputs.custom_router_ip }}"
           extra_content_ip="#### 管理地址 $custom_router_ip"
           echo -e "\n $extra_content_ip" >> ${{ github.workspace }}/mediatek-filogic/info.md
-          
-          
+
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload ImmortalWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}
+          tag_name: ${{ github.event.inputs.profile }}-${{ env.BUILD_DATE }}
           name: ImmortalWrt-Wireless
           body_path: ${{ github.workspace }}/mediatek-filogic/info.md
           files: |

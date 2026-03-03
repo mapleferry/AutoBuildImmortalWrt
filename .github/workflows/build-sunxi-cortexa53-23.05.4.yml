@@ -90,11 +90,14 @@ jobs:
           else
             echo -e "NO docker"
           fi
-          
+
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Autobuild-sunxi-cortexa53
+          tag_name: Autobuild-sunxi-cortexa53-${{ env.BUILD_DATE }}
           name: ImmortalWrt-sunxi-cortexa53
           body_path: ${{ github.workspace }}/sunxi-cortexa53/info.md
           files: |

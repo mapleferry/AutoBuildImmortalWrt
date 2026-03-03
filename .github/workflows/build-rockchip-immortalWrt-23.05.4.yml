@@ -152,10 +152,13 @@ jobs:
             echo -e "\n#### 不带docker" >> ${{ github.workspace }}/router-info.md
           fi
 
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Autobuild-23.05.4
+          tag_name: Autobuild-rockchip-23.05.4-${{ env.BUILD_DATE }}
           name: ImmortWrt-Rockchip
           body_path: ${{ github.workspace }}/router-info.md
           files: |

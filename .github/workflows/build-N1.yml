@@ -284,11 +284,13 @@ jobs:
              mv "$FILE" "${{ env.PACKAGED_OUTPUTPATH }}/immortalwrt-$LUCI_VERSION-phicomm-n1-btrfs-$KERNEL_VERSION.img.gz"
           fi
 
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
 
       - name: Upload firmware to GitHub Releases
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: phicomm-n1
+          tag_name: phicomm-n1-${{ env.BUILD_DATE }}
           name: ImmortalWrt for Phicomm N1
           body_path: ${{ github.workspace }}/n1/info.md
           files: |

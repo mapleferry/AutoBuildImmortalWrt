@@ -104,10 +104,13 @@ jobs:
             echo -e "NO docker"
           fi
 
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload ImmortalWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Autobuild-raspberrypi
+          tag_name: Autobuild-raspberrypi-${{ env.BUILD_DATE }}
           body_path: ${{ github.workspace }}/info.md
           files: |
             ${{ github.workspace }}/bin/targets/bcm27xx/${{ env.cpu }}/*squashfs-factory.img.gz

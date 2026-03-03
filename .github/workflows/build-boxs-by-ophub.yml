@@ -336,10 +336,13 @@ jobs:
             echo "Renamed to: $NEW_NAME"
           done
 
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload firmware to GitHub Releases
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ophub
+          tag_name: ophub-${{ env.BUILD_DATE }}
           name: ImmortalWrt for boxs
           body_path: ${{ github.workspace }}/n1/box.md
           files: |

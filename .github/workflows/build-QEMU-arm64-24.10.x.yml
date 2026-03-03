@@ -111,10 +111,13 @@ jobs:
           cp ${{ github.workspace }}/bin/targets/armsr/armv8/*.qcow2 ${{ github.workspace }}
           cp ${{ github.workspace }}/bin/targets/armsr/armv8/*.vmdk ${{ github.workspace }}
 
+      - name: Set build date tag
+        run: echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: QEMU
+          tag_name: QEMU-${{ env.BUILD_DATE }}
           name: ImmortWrt-QEMU-armsr-armv8-24.10.x
           body_path: ${{ github.workspace }}/armsr-armv8/info.md
           files: |
