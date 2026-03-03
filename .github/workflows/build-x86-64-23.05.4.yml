@@ -107,6 +107,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y qemu-utils
           cd ${{ github.workspace }}/bin/targets/x86/64
+          sudo chown -R $USER: .
           for f in *squashfs-combined-efi.img.gz; do
             [ -f "$f" ] || continue
             gunzip -k "$f"
