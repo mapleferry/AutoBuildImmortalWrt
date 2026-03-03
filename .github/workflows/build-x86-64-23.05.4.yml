@@ -103,18 +103,8 @@ jobs:
               immortalwrt/imagebuilder:x86-64-openwrt-23.05.4 /bin/bash /home/build/immortalwrt/build.sh
           done
 
-      - name: Convert IMG to QCOW2
-        run: |
-          sudo apt-get update && sudo apt-get install -y qemu-utils
-          cd ${{ github.workspace }}/bin/targets/x86/64
-          sudo chown -R $USER: .
-          for f in *squashfs-combined-efi.img.gz; do
-            [ -f "$f" ] || continue
-            gunzip -k "$f"
-            img="${f%.gz}"
-            qemu-img convert -f raw -O qcow2 "$img" "${img%.img}.qcow2"
-            rm -f "$img"
-          done
+      - name: Fix permissions for release upload
+        run: sudo chown -R $USER: ${{ github.workspace }}/bin
 
       - name: Create info
         run: |

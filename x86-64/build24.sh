@@ -99,4 +99,23 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# 构建 IMG 后同时生成 QCOW2（在容器内完成，无权限问题）
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Converting IMG to QCOW2..."
+if ! command -v qemu-img &>/dev/null; then
+    apt-get update -qq && apt-get install -y -qq qemu-utils 2>/dev/null || true
+fi
+if command -v qemu-img &>/dev/null; then
+    cd bin/targets/x86/64
+    for f in *squashfs-combined-efi.img.gz; do
+        [ -f "$f" ] || continue
+        gzip -dc "$f" > "${f%.gz}" || [ $? -eq 2 ]
+        [ -f "${f%.gz}" ] || { echo "Decompression failed"; exit 1; }
+        qemu-img convert -f raw -O qcow2 "${f%.gz}" "${f%.img.gz}.qcow2"
+        rm -f "${f%.gz}"
+    done
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - QCOW2 conversion completed."
+else
+    echo "⚠️ qemu-img not found, skip QCOW2 conversion."
+fi
+
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
